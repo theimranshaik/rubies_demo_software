@@ -1,0 +1,278 @@
+ <!DOCTYPE html>
+<html lang="en" class="select-none touch-none text-[18px] sm:text-[24px] text-black font-instrument">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Ruby</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans&family=Roboto+Mono:wght@400&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { border-radius: 0 !important; }
+    .blur-bg::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      backdrop-filter: blur(8px);
+      background-color: rgba(0, 0, 0, 0.3);
+      z-index: -1;
+    }
+    .status-header {
+      font-family: 'Roboto Mono', monospace;
+      text-transform: uppercase;
+      font-weight: 400;
+      color: white;
+      padding: 0.4rem 0.6rem;
+      display: inline-block;
+      font-size: 0.75rem;
+    }
+    .status-New { background-color: #000000; }
+    .status-Contacted { background-color: #1A73E8; }
+    .status-Interested { background-color: #FABB05; color: #000; }
+    .status-Not-Interested { background-color: #EA4335; }
+    .status-Customer { background-color: #34A853; }
+    .loading {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body class="bg-white font-instrument px-2 pt-2 pb-6 overflow-hidden">
+
+  <!-- Floating Header -->
+  <header class="fixed top-2 left-2 right-2 z-50 border px-4 py-2 flex justify-between items-center bg-white/80 backdrop-blur-sm border-gray-300">
+    <div class="font-semibold uppercase tracking-widest">Ruby</div>
+    <button onclick="openPopup()" class="border border-black bg-black text-white px-4 py-2 text-sm">+ Add New</button>
+  </header>
+
+  <!-- Main Workspace -->
+  <main id="workspace" class="pt-20 pb-6 overflow-y-auto max-h-[90vh] space-y-6 text-[1rem]">
+    <div id="empty-guide" class="absolute top-1/2 text-center text-sm text-gray-500 px-6">
+      Tap the + Add New button to add new leads and manage
+    </div>
+    <div id="loading" class="absolute top-1/2 text-center text-sm text-gray-500 px-6 hidden">
+      Loading leads...
+    </div>
+  </main>
+
+  <!-- Add/Edit Popup -->
+  <div id="popup" class="hidden fixed inset-0 z-50 flex items-center justify-center blur-bg">
+    <div class="relative bg-white border border-gray-300 p-5 w-[92%] max-w-sm space-y-4">
+      <div class="flex justify-between items-center">
+        <div id="popup-title" class="text-base">Add New Lead</div>
+        <button onclick="closePopup()" class="text-sm">✕</button>
+      </div>
+
+      <input id="lead-name" type="text" placeholder="Name" class="w-full border border-gray-300 px-3 py-2 text-sm" />
+      <input id="lead-number" type="tel" placeholder="Phone (10 digits)" pattern="[0-9]{10}" maxlength="10" class="w-full border border-gray-300 px-3 py-2 text-sm" />
+
+      <!-- Status Buttons -->
+      <div class="flex flex-wrap gap-2" id="status-buttons">
+        <button data-status="New" onclick="selectStatus(this)" class="border border-gray-300 px-4 py-2 text-xs status-btn">New</button>
+        <button data-status="Contacted" onclick="selectStatus(this)" class="border border-gray-300 px-4 py-2 text-xs status-btn">Contacted</button>
+        <button data-status="Interested" onclick="selectStatus(this)" class="border border-gray-300 px-4 py-2 text-xs status-btn">Interested</button>
+        <button data-status="Not Interested" onclick="selectStatus(this)" class="border border-gray-300 px-4 py-2 text-xs status-btn">Not Interested</button>
+        <button data-status="Customer" onclick="selectStatus(this)" class="border border-gray-300 px-4 py-2 text-xs status-btn">Customer</button>
+      </div>
+
+      <div class="flex justify-end pt-2">
+        <button id="submit-btn" onclick="submitLead()" class="border border-black bg-black text-white px-4 py-2 text-xs">Add Lead</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Redirect after hitting 24 July 2025
+    const redirectAfter = new Date("2025-07-24");
+    if (new Date() >= redirectAfter) {
+      window.location.href = "https://theimranshaik.github.io/Imrandrivingschool";
+    }
+
+    const dbName = "RubyLeadsDB";
+    const dbVersion = 1;
+    let db;
+    let leads = [];
+    let selectedStatus = null;
+    let editingId = null;
+
+    const statusSections = ["New", "Contacted", "Interested", "Not Interested", "Customer"];
+    const workspace = document.getElementById("workspace");
+    const popup = document.getElementById("popup");
+    const nameInput = document.getElementById("lead-name");
+    const numberInput = document.getElementById("lead-number");
+    const statusButtons = document.querySelectorAll(".status-btn");
+    const popupTitle = document.getElementById("popup-title");
+    const emptyGuide = document.getElementById("empty-guide");
+    const loadingDiv = document.getElementById("loading");
+    const submitBtn = document.getElementById("submit-btn");
+
+    function openDB() {
+      const request = indexedDB.open(dbName, dbVersion);
+
+      request.onerror = () => alert("Failed to open IndexedDB.");
+      request.onsuccess = (event) => {
+        db = event.target.result;
+        loadLeads();
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains("leads")) {
+          db.createObjectStore("leads", { keyPath: "id", autoIncrement: true });
+        }
+      };
+    }
+
+    function loadLeads() {
+      const transaction = db.transaction(["leads"], "readonly");
+      const store = transaction.objectStore("leads");
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        leads = request.result.sort((a, b) => b.id - a.id);
+        renderLeads();
+      };
+    }
+
+    function saveLead(lead) {
+      const transaction = db.transaction(["leads"], "readwrite");
+      const store = transaction.objectStore("leads");
+      store.add(lead);
+      transaction.oncomplete = () => loadLeads();
+    }
+
+    function updateLead(id, updatedLead) {
+      const transaction = db.transaction(["leads"], "readwrite");
+      const store = transaction.objectStore("leads");
+      store.put({ ...updatedLead, id });
+      transaction.oncomplete = () => loadLeads();
+    }
+
+    function deleteLead(id) {
+      const transaction = db.transaction(["leads"], "readwrite");
+      const store = transaction.objectStore("leads");
+      store.delete(id);
+      transaction.oncomplete = () => loadLeads();
+    }
+
+    function openPopup(id = null) {
+      editingId = id;
+      popup.classList.remove("hidden");
+      popup.classList.add("flex");
+
+      if (id !== null) {
+        const lead = leads.find(l => l.id === id);
+        nameInput.value = lead.name;
+        numberInput.value = lead.number;
+        selectStatus(null, lead.status);
+        popupTitle.innerText = "Edit Lead";
+        submitBtn.innerText = "Update Lead";
+      } else {
+        nameInput.value = "";
+        numberInput.value = "";
+        selectStatus(null);
+        popupTitle.innerText = "Add New Lead";
+        submitBtn.innerText = "Add Lead";
+      }
+    }
+
+    function closePopup() {
+      popup.classList.add("hidden");
+      popup.classList.remove("flex");
+    }
+
+    function selectStatus(button, forceStatus = null) {
+      statusButtons.forEach(btn => btn.classList.remove("bg-black", "text-white"));
+      if (button) {
+        button.classList.add("bg-black", "text-white");
+        selectedStatus = button.dataset.status;
+      } else if (forceStatus) {
+        selectedStatus = forceStatus;
+        statusButtons.forEach(btn => {
+          if (btn.dataset.status === forceStatus) {
+            btn.classList.add("bg-black", "text-white");
+          }
+        });
+      } else {
+        selectedStatus = null;
+      }
+    }
+
+    function submitLead() {
+      const name = nameInput.value.trim();
+      const number = numberInput.value.trim();
+
+      if (!name || !/^\d{10}$/.test(number) || !selectedStatus) {
+        alert("Please enter valid name, 10-digit number, and select a status.");
+        return;
+      }
+
+      const lead = { name, number, status: selectedStatus };
+
+      if (editingId !== null) {
+        updateLead(editingId, lead);
+      } else {
+        saveLead(lead);
+      }
+
+      closePopup();
+    }
+
+    function confirmDelete(id) {
+      if (confirm("Are you sure you want to delete this lead?")) {
+        deleteLead(id);
+      }
+    }
+
+    function renderLeads() {
+      workspace.innerHTML = "";
+      const hasLeads = leads.length > 0;
+
+      if (!hasLeads) {
+        emptyGuide.style.display = "block";
+        workspace.appendChild(emptyGuide);
+        return;
+      }
+
+      emptyGuide.style.display = "none";
+
+      statusSections.forEach(status => {
+        const sectionLeads = leads.filter(l => l.status === status);
+        if (sectionLeads.length === 0) return;
+
+        const section = document.createElement("section");
+        section.classList.add("space-y-2");
+
+        const title = document.createElement("div");
+        title.className = `status-header status-${status.replace(" ", "-")}`;
+        title.innerText = `${status} [${sectionLeads.length}]`;
+
+        const list = document.createElement("div");
+        list.className = "space-y-2";
+
+        sectionLeads.forEach(lead => {
+          const card = document.createElement("div");
+          card.className = "border border-gray-300 p-3 space-y-1";
+
+          card.innerHTML = `
+            <div class="text-sm">${lead.name}</div>
+            <div class="text-xs text-gray-700">${lead.number}</div>
+            <div class="flex gap-2 pt-2">
+              <button onclick="openPopup(${lead.id})" class="border border-black px-2 py-1 text-xs">Edit</button>
+              <a href="https://wa.me/${lead.number}" class="border border-black px-2 py-1 text-xs">Message</a>
+              <a href="tel:${lead.number}" class="border border-black px-2 py-1 text-xs">Call</a>
+              <button onclick="confirmDelete(${lead.id})" class="border border-red-500 text-red-500 px-2 py-1 text-xs">Delete</button>
+            </div>
+          `;
+          list.appendChild(card);
+        });
+
+        section.appendChild(title);
+        section.appendChild(list);
+        workspace.appendChild(section);
+      });
+    }
+
+    window.onload = openDB;
+  </script>
+</body>
+</html>
